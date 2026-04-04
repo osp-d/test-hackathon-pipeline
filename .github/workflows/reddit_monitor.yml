@@ -23,7 +23,7 @@ on:
       time_filter:
         description: 'Reddit time filter: hour | day | week | all'
         required: false
-        default: 'all'
+        default: 'hour'
       run_alert_check:
         description: 'Run alert check after scrape? true | false'
         required: false
