@@ -40,14 +40,14 @@ CORE_KEYWORDS = ["claude", "anthropic"]
 CLAUDE_LAUNCH_UTC = 1677628800
 CONCURRENCY = 5
 
-# ── FIX 1: time_filter controls history depth ─────────────────────────────────
-# "hour"  → only posts from the last hour  (use for scheduled/alert runs)
-# "day"   → last 24 h                      (use for daily digest)
-# "all"   → full history                   (use for initial backfill only)
+# FIX 1: time_filter controls history depth.
+# "hour" → only posts from the last hour  (scheduled/alert runs)
+# "day"  → last 24 h                      (daily digest)
+# "all"  → full history                   (initial backfill only)
 TIME_FILTER = os.environ.get("TIME_FILTER", "hour")
 
-# ── FIX 3: output path ────────────────────────────────────────────────────────
-DATA_PATH = "data/reddit_data.csv"
+# Script lives in scrapers/, data lives in data/ at repo root
+DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "reddit_data.csv")
 
 
 def is_relevant(title, body):
@@ -119,12 +119,11 @@ def parse_post(p, query, tier):
         "post_hint": p.get("post_hint", ""),
         "has_image": p.get("url", "").endswith((".jpg", ".png", ".gif", ".jpeg")),
         "is_stickied": p.get("stickied", False),
-        # ── FIX 3: record scrape time for freshness tracking ──
         "scraped_at_utc": int(time.time()),
     }
 
 
-# ── FIX 2: exponential backoff retry ─────────────────────────────────────────
+# FIX 2: exponential backoff — retries instead of returning None on 429
 async def fetch_page(session, semaphore, url, params, retries=3):
     async with semaphore:
         for attempt in range(retries):
@@ -134,10 +133,10 @@ async def fetch_page(session, semaphore, url, params, retries=3):
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as r:
                     if r.status == 429:
-                        wait = 2 ** (attempt + 1)   # 2s, 4s, 8s
+                        wait = 2 ** (attempt + 1)   # 2s → 4s → 8s
                         print(f"  Rate limited — backoff {wait}s (attempt {attempt+1}/{retries})")
                         await asyncio.sleep(wait)
-                        continue                     # retry, don't return None
+                        continue
                     if r.status != 200:
                         print(f"  HTTP {r.status} — skipping")
                         return None
@@ -154,8 +153,8 @@ async def search_reddit(session, semaphore, subreddit, query, tier, limit=100):
     url = f"https://www.reddit.com/r/{subreddit}/search.json"
     params = {
         "q": query,
-        "sort": "new",            # ← "new" is better for real-time; "relevance" buries fresh posts
-        "t": TIME_FILTER,         # ← FIX 1: controlled by env var
+        "sort": "new",        # "new" surfaces fresh posts; "relevance" buries them
+        "t": TIME_FILTER,     # FIX 1: controlled by env var
         "limit": 100,
         "restrict_sr": "true",
     }
@@ -195,20 +194,19 @@ async def run_tier(session, semaphore, subreddits, queries, tier, label):
         for subreddit in subreddits
         for query in queries
     ]
-
     total = len(tasks)
-    print(f"  Running {total} queries (max {CONCURRENCY} concurrent, TIME_FILTER={TIME_FILTER})...")
+    print(f"  {total} queries (max {CONCURRENCY} concurrent, TIME_FILTER={TIME_FILTER})")
 
     all_posts = []
     for i, coro in enumerate(asyncio.as_completed(tasks), 1):
         posts = await coro
         all_posts.extend(posts)
-        print(f"  [{label}] {i}/{total} done — {len(posts)} posts")
+        print(f"  [{label}] {i}/{total} — {len(posts)} posts")
 
     return all_posts
 
 
-# ── FIX 3: append-and-deduplicate instead of overwrite ───────────────────────
+# FIX 3: append-and-deduplicate instead of overwrite
 def save_with_dedup(new_df, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -218,11 +216,9 @@ def save_with_dedup(new_df, path):
     else:
         combined = new_df
 
-    # Dedup by URL; keep the row with the highest score (freshest data wins)
     combined.sort_values("score", ascending=False, inplace=True)
     combined.drop_duplicates(subset="url", keep="first", inplace=True)
     combined.drop_duplicates(subset="title", keep="first", inplace=True)
-    combined.sort_values("score", ascending=False, inplace=True)
     combined.reset_index(drop=True, inplace=True)
     combined.to_csv(path, index=False)
     return combined
@@ -236,33 +232,27 @@ async def main():
         print(f"Scrape run — TIME_FILTER={TIME_FILTER}")
         print("=" * 60)
 
-        print("\nTier 1 — broad subreddits, core queries")
+        print("\nTier 1 — broad subreddits")
         tier1_posts = await run_tier(
-            session, semaphore,
-            TIER1_SUBREDDITS, TIER1_QUERIES,
-            tier=1, label="T1"
+            session, semaphore, TIER1_SUBREDDITS, TIER1_QUERIES, tier=1, label="T1"
         )
 
-        print("\nTier 2 — core AI subreddits, all queries")
+        print("\nTier 2 — AI subreddits")
         tier2_posts = await run_tier(
-            session, semaphore,
-            TIER2_SUBREDDITS, TIER2_QUERIES,
-            tier=2, label="T2"
+            session, semaphore, TIER2_SUBREDDITS, TIER2_QUERIES, tier=2, label="T2"
         )
 
     new_df = pd.DataFrame(tier1_posts + tier2_posts)
     if new_df.empty:
-        print("No new posts found this run.")
+        print("No new posts this run.")
         return
 
     combined = save_with_dedup(new_df, DATA_PATH)
 
     print("\n" + "=" * 60)
-    print(f"Run complete — {len(new_df)} new posts scraped")
-    print(f"Total in dataset after dedup: {len(combined)}")
-    print(f"  Viral (score>5000): {len(combined[combined['engagement_bucket']=='viral'])}")
-    print(f"  High  (score>1000): {len(combined[combined['engagement_bucket']=='high'])}")
-    print(f"  score_per_hour > 250: {len(combined[combined['score_per_hour']>250])}")
+    print(f"Run complete — {len(new_df)} new posts | {len(combined)} total after dedup")
+    print(f"  Viral (>5000):       {len(combined[combined['engagement_bucket']=='viral'])}")
+    print(f"  score_per_hour >250: {len(combined[combined['score_per_hour']>250])}")
     print("=" * 60)
 
 
