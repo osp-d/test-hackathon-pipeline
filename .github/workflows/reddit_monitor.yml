@@ -33,6 +33,9 @@ env:
   TIME_FILTER: ${{ github.event.inputs.time_filter || 'hour' }}
   RUN_ALERT: ${{ github.event.inputs.run_alert_check || 'true' }}
 
+permissions:
+  contents: write
+
 jobs:
   scrape:
     name: Scrape & Alert
