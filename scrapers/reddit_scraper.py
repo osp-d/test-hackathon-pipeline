@@ -5,7 +5,9 @@ import pandas as pd
 from datetime import datetime
 import os
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (research project)"}
+HEADERS = headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
 
 TIER2_SUBREDDITS = [
     "ClaudeAI", "ChatGPT", "artificial",
