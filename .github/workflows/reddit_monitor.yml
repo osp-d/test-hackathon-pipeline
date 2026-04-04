@@ -1,0 +1,101 @@
+# .github/workflows/reddit_monitor.yml
+#
+# Secrets required (repo Settings → Secrets → Actions):
+#   TELEGRAM_BOT_TOKEN  — from @BotFather
+#   TELEGRAM_CHAT_ID    — your personal or group chat ID
+#
+# Repo layout assumed:
+#   scrapers/reddit_scraper.py   ← the scraper
+#   alert_check.py               ← alert logic (repo root)
+#   data/reddit_data.csv         ← output, committed back each run
+
+name: Reddit Virality Monitor
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's practical floor on free runners is ~5 min;
+    # 15 min is the reliable cadence that won't queue behind other jobs.
+    - cron: '*/15 * * * *'
+
+  # Manual trigger — use for initial backfill (set time_filter = all)
+  workflow_dispatch:
+    inputs:
+      time_filter:
+        description: 'Reddit time filter: hour | day | week | all'
+        required: false
+        default: 'hour'
+      run_alert_check:
+        description: 'Run alert check after scrape? true | false'
+        required: false
+        default: 'true'
+
+env:
+  TIME_FILTER: ${{ github.event.inputs.time_filter || 'hour' }}
+  RUN_ALERT: ${{ github.event.inputs.run_alert_check || 'true' }}
+
+jobs:
+  scrape:
+    name: Scrape & Alert
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── 2. Restore cached dataset ─────────────────────────────────────────
+      # Gives the scraper its memory between runs without a database.
+      # Key rotates daily; restore-keys fallback hits the previous day's cache.
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: data/reddit_data.csv
+          key: reddit-data-${{ runner.os }}-${{ hashFiles('data/reddit_data.csv') }}
+          restore-keys: |
+            reddit-data-${{ runner.os }}-
+
+      # ── 3. Python setup ───────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install aiohttp pandas requests
+
+      # ── 4. Run scraper ────────────────────────────────────────────────────
+      - name: Scrape Reddit
+        env:
+          TIME_FILTER: ${{ env.TIME_FILTER }}
+        run: python scrapers/reddit_scraper.py
+
+      # ── 5. Run alert check ────────────────────────────────────────────────
+      - name: Check virality thresholds
+        if: env.RUN_ALERT == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python alert_check.py
+
+      # ── 6. Upload dataset as artifact ─────────────────────────────────────
+      # Retained 7 days — downloadable from the Actions UI for weekly review.
+      - name: Upload dataset artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reddit-data-${{ github.run_id }}
+          path: data/reddit_data.csv
+          retention-days: 7
+
+      # ── 7. Commit updated CSV back to repo ────────────────────────────────
+      # [skip ci] on the commit message prevents this push from triggering
+      # another workflow run (infinite loop prevention).
+      - name: Commit updated dataset
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/reddit_data.csv
+          git diff --cached --quiet || git commit -m "chore: update reddit_data.csv [skip ci]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
