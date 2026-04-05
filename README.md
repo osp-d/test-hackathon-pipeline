@@ -10,7 +10,7 @@ TELEGRAM_CHAT_ID=...
 ```
 
 ## 1. Clone the Repository
-git clone https://github.com/your-username/your-repo.git
+git clone https://github.com/osp-d/test-hackathon-pipeline.git
 cd your-repo
 
 ## 2. Create Virtual Environment
