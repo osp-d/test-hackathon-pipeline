@@ -9,11 +9,11 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 ```
 
-1. Clone the Repository
+## 1. Clone the Repository
 git clone https://github.com/your-username/your-repo.git
 cd your-repo
 
-2. Create Virtual Environment
+## 2. Create Virtual Environment
 macOS / Linux
 ```bash
 python3 -m venv venv
@@ -26,13 +26,13 @@ python -m venv venv
 venv\Scripts\activate
 ```
 
-3. Install Dependencies
+## 3. Install Dependencies
 ```bash
 pip install --upgrade pip
 pip install aiohttp pandas requests
 ```
 
-4. Configure Scraper Mode
+## 4. Configure Scraper Mode
 Set how much historical data to pull using TIME_FILTER:
 macOS / Linux
 ```bash
@@ -49,12 +49,12 @@ Windows (CMD)
 set TIME_FILTER=hour
 ```
 
-5. Run Scraper
+## 5. Run Scraper
 ```bash
 python scrapers/reddit_scraper.py
 ```
 
-6. Run Enrichment (Comments + Authors)
+## 6. Run Enrichment (Comments + Authors)
 After scraping:
 ```bash
 python scrapers/reddit_enrichment.py
